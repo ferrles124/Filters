@@ -68,7 +68,7 @@
         baseOptions: {
           modelAssetPath:
             "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "CPU",
+          delegate: "GPU",
         },
         runningMode: "VIDEO",
         numHands: 2,
@@ -78,7 +78,7 @@
 
     async function startCamera() {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: { facingMode: "user", width: 640, height: 480 },
         audio: false,
       });
       video.srcObject = stream;
@@ -93,7 +93,6 @@
 
     const INDEX_TIP = 8;
     const THUMB_TIP = 4;
-    let frameCount = 0;
     let lastHandCount = 0;
 
     function drawLoop() {
