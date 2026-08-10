@@ -13,14 +13,29 @@
       align-items: center;
       height: 100vh;
       overflow: hidden;
+      flex-direction: column;
     }
     canvas {
       max-width: 100%;
       max-height: 100%;
     }
+    #status {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      color: lime;
+      background: rgba(0,0,0,0.7);
+      font-family: monospace;
+      font-size: 12px;
+      padding: 4px;
+      z-index: 10;
+      white-space: pre-wrap;
+    }
   </style>
 </head>
 <body>
+  <div id="status">Başlıyor...</div>
   <canvas id="canvas"></canvas>
 
   <script type="module">
@@ -28,6 +43,12 @@
       HandLandmarker,
       FilesetResolver,
     } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+    const statusEl = document.getElementById("status");
+    function log(msg) {
+      statusEl.textContent = msg;
+      console.log(msg);
+    }
 
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
@@ -38,41 +59,42 @@
     let handLandmarker = null;
 
     async function setupHandLandmarker() {
+      log("Model dosyaları indiriliyor...");
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
       );
+      log("Model yükleniyor...");
       handLandmarker = await HandLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
             "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
-          delegate: "GPU",
+          delegate: "CPU",
         },
         runningMode: "VIDEO",
         numHands: 2,
       });
+      log("Model hazır, kamera başlatılıyor...");
     }
 
     async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false,
-        });
-        video.srcObject = stream;
-        await video.play();
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
 
-        drawLoop();
-      } catch (err) {
-        alert("Kamera açılamadı: " + err.message);
-      }
+      log("Çalışıyor.");
+      drawLoop();
     }
 
-    // MediaPipe landmark indeksleri (Python'daki INDEX_TIP / THUMB_TIP ile aynı)
     const INDEX_TIP = 8;
     const THUMB_TIP = 4;
+    let frameCount = 0;
+    let lastHandCount = 0;
 
     function drawLoop() {
       const nowMs = performance.now();
@@ -87,6 +109,12 @@
       ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
       ctx.restore();
 
+      const handCount = results && results.landmarks ? results.landmarks.length : 0;
+      if (handCount !== lastHandCount) {
+        log(`Çalışıyor. Tespit edilen el: ${handCount}`);
+        lastHandCount = handCount;
+      }
+
       if (results && results.landmarks) {
         for (const landmarks of results.landmarks) {
           drawPoint(landmarks[INDEX_TIP], "lime");
@@ -98,19 +126,24 @@
     }
 
     function drawPoint(landmark, color) {
-      // landmark.x MediaPipe'ta 0-1 arası, video orjinal (aynasız) koordinatta.
-      // Canvas aynalı çizildiği için x'i ters çeviriyoruz.
       const x = (1 - landmark.x) * canvas.width;
       const y = landmark.y * canvas.height;
       ctx.beginPath();
-      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.arc(x, y, 10, 0, 2 * Math.PI);
       ctx.fillStyle = color;
       ctx.fill();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
 
     async function main() {
-      await setupHandLandmarker();
-      await startCamera();
+      try {
+        await setupHandLandmarker();
+        await startCamera();
+      } catch (err) {
+        log("HATA: " + err.message);
+      }
     }
 
     main();
