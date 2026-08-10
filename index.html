@@ -93,7 +93,98 @@
 
     const INDEX_TIP = 8;
     const THUMB_TIP = 4;
-    let lastHandCount = 0;
+
+    // ---- Portal geometrisi (geometry.py'nin JS karşılığı) ----
+
+    function portalWidth(p1, p2, p3, p4) {
+      const topW = Math.hypot(p3.x - p1.x, p3.y - p1.y);
+      const bottomW = Math.hypot(p4.x - p2.x, p4.y - p2.y);
+      return (topW + bottomW) / 2.0;
+    }
+
+    class ClosingGestureDetector {
+      constructor(closeRatio = 0.16, openRatio = 0.30) {
+        this.closeRatio = closeRatio;
+        this.openRatio = openRatio;
+        this.isClosed = false;
+      }
+      update(width, frameW) {
+        const closeThreshold = this.closeRatio * frameW;
+        const openThreshold = this.openRatio * frameW;
+        let triggered = false;
+        if (!this.isClosed && width < closeThreshold) {
+          this.isClosed = true;
+          triggered = true;
+        } else if (this.isClosed && width > openThreshold) {
+          this.isClosed = false;
+        }
+        return triggered;
+      }
+    }
+
+    // ---- Filtreler (şimdilik sadece placeholder grid) ----
+
+    function filtroGrid(imageData) {
+      const { data, width, height } = imageData;
+      const step = 20;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          if (x % step === 0 || y % step === 0) {
+            const i = (y * width + x) * 4;
+            data[i] = 255;
+            data[i + 1] = 255;
+            data[i + 2] = 255;
+          }
+        }
+      }
+      return imageData;
+    }
+
+    const FILTROS = [filtroGrid];
+    let filtroIndex = 0;
+
+    function renderPortal(p1, p2, p3, p4, filtroFunc) {
+      const polygon = [p1, p3, p4, p2];
+
+      const xs = polygon.map((p) => p.x);
+      const ys = polygon.map((p) => p.y);
+      let x = Math.max(0, Math.floor(Math.min(...xs)));
+      let y = Math.max(0, Math.floor(Math.min(...ys)));
+      let bw = Math.ceil(Math.max(...xs)) - x;
+      let bh = Math.ceil(Math.max(...ys)) - y;
+      bw = Math.min(bw, canvas.width - x);
+      bh = Math.min(bh, canvas.height - y);
+      if (bw <= 1 || bh <= 1) return;
+
+      // Poligonla kırp (mask.fillPoly + blend'in canvas karşılığı)
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(polygon[0].x, polygon[0].y);
+      for (let i = 1; i < polygon.length; i++) {
+        ctx.lineTo(polygon[i].x, polygon[i].y);
+      }
+      ctx.closePath();
+      ctx.clip();
+
+      const imageData = ctx.getImageData(x, y, bw, bh);
+      const filtered = filtroFunc(imageData);
+      ctx.putImageData(filtered, x, y);
+
+      ctx.restore();
+
+      // Portal çerçevesi
+      ctx.beginPath();
+      ctx.moveTo(polygon[0].x, polygon[0].y);
+      for (let i = 1; i < polygon.length; i++) {
+        ctx.lineTo(polygon[i].x, polygon[i].y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = "white";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    const closingDetector = new ClosingGestureDetector();
 
     function drawLoop() {
       const nowMs = performance.now();
@@ -108,32 +199,38 @@
       ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
       ctx.restore();
 
-      const handCount = results && results.landmarks ? results.landmarks.length : 0;
-      if (handCount !== lastHandCount) {
-        log(`Çalışıyor. Tespit edilen el: ${handCount}`);
-        lastHandCount = handCount;
-      }
+      if (results && results.landmarks && results.landmarks.length === 2) {
+        // Ekranda hangi el solda hangi el sağda: mirrored x'e göre sırala
+        const hands = results.landmarks
+          .map((lm) => ({
+            lm,
+            mirroredX: 1 - lm[INDEX_TIP].x,
+          }))
+          .sort((a, b) => a.mirroredX - b.mirroredX);
 
-      if (results && results.landmarks) {
-        for (const landmarks of results.landmarks) {
-          drawPoint(landmarks[INDEX_TIP], "lime");
-          drawPoint(landmarks[THUMB_TIP], "red");
+        const lmLeft = hands[0].lm;
+        const lmRight = hands[1].lm;
+
+        const toPoint = (landmark) => ({
+          x: (1 - landmark.x) * canvas.width,
+          y: landmark.y * canvas.height,
+        });
+
+        const p1 = toPoint(lmLeft[INDEX_TIP]);
+        const p2 = toPoint(lmLeft[THUMB_TIP]);
+        const p3 = toPoint(lmRight[INDEX_TIP]);
+        const p4 = toPoint(lmRight[THUMB_TIP]);
+
+        const width = portalWidth(p1, p2, p3, p4);
+
+        if (closingDetector.update(width, canvas.width)) {
+          filtroIndex = (filtroIndex + 1) % FILTROS.length;
         }
+
+        renderPortal(p1, p2, p3, p4, FILTROS[filtroIndex]);
       }
 
       requestAnimationFrame(drawLoop);
-    }
-
-    function drawPoint(landmark, color) {
-      const x = (1 - landmark.x) * canvas.width;
-      const y = landmark.y * canvas.height;
-      ctx.beginPath();
-      ctx.arc(x, y, 10, 0, 2 * Math.PI);
-      ctx.fillStyle = color;
-      ctx.fill();
-      ctx.strokeStyle = "white";
-      ctx.lineWidth = 2;
-      ctx.stroke();
     }
 
     async function main() {
