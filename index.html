@@ -23,12 +23,34 @@
 <body>
   <canvas id="canvas"></canvas>
 
-  <script>
+  <script type="module">
+    import {
+      HandLandmarker,
+      FilesetResolver,
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
     const canvas = document.getElementById("canvas");
     const ctx = canvas.getContext("2d");
     const video = document.createElement("video");
     video.playsInline = true;
     video.muted = true;
+
+    let handLandmarker = null;
+
+    async function setupHandLandmarker() {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+      );
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+      });
+    }
 
     async function startCamera() {
       try {
@@ -48,15 +70,50 @@
       }
     }
 
+    // MediaPipe landmark indeksleri (Python'daki INDEX_TIP / THUMB_TIP ile aynı)
+    const INDEX_TIP = 8;
+    const THUMB_TIP = 4;
+
     function drawLoop() {
+      const nowMs = performance.now();
+      let results = null;
+
+      if (handLandmarker) {
+        results = handLandmarker.detectForVideo(video, nowMs);
+      }
+
       ctx.save();
-      ctx.scale(-1, 1); // ayna efekti (selfie kamera)
+      ctx.scale(-1, 1);
       ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
       ctx.restore();
+
+      if (results && results.landmarks) {
+        for (const landmarks of results.landmarks) {
+          drawPoint(landmarks[INDEX_TIP], "lime");
+          drawPoint(landmarks[THUMB_TIP], "red");
+        }
+      }
+
       requestAnimationFrame(drawLoop);
     }
 
-    startCamera();
+    function drawPoint(landmark, color) {
+      // landmark.x MediaPipe'ta 0-1 arası, video orjinal (aynasız) koordinatta.
+      // Canvas aynalı çizildiği için x'i ters çeviriyoruz.
+      const x = (1 - landmark.x) * canvas.width;
+      const y = landmark.y * canvas.height;
+      ctx.beginPath();
+      ctx.arc(x, y, 8, 0, 2 * Math.PI);
+      ctx.fillStyle = color;
+      ctx.fill();
+    }
+
+    async function main() {
+      await setupHandLandmarker();
+      await startCamera();
+    }
+
+    main();
   </script>
 </body>
 </html>
