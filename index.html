@@ -5,166 +5,27 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Sky Hunt</title>
   <style>
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; overflow: hidden; display: grid; place-items: center; background: #081329; font-family: system-ui, sans-serif; }
-    canvas { width: min(100vw, 1280px); height: min(100vh, 720px); object-fit: contain; }
-    #status { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 2; padding: 8px 14px; border-radius: 999px; background: #07101dcc; color: white; font-size: 14px; text-align: center; }
-    #start { position: fixed; z-index: 3; border: 0; border-radius: 14px; padding: 14px 24px; background: #ffb703; color: #18202b; font-size: 18px; font-weight: 700; cursor: pointer; }
-    #start.hidden { display: none; }
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;overflow:hidden;display:grid;place-items:center;background:#081329;font-family:system-ui,sans-serif}canvas{width:min(100vw,1280px);height:min(100vh,720px);object-fit:contain}#status{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:2;padding:8px 14px;border-radius:999px;background:#07101dcc;color:#fff;font-size:14px;text-align:center}#start{position:fixed;z-index:3;border:0;border-radius:14px;padding:14px 24px;background:#ffb703;color:#18202b;font-size:18px;font-weight:700;cursor:pointer}#start.hidden{display:none}
   </style>
 </head>
 <body>
-  <div id="status">Oyunu başlatmak için butona bas</div>
-  <button id="start">Oyunu Başlat</button>
-  <canvas id="game" width="1280" height="720"></canvas>
-  <video id="camera" autoplay playsinline muted hidden></video>
-
+  <div id="status">Oyunu başlatmak için butona bas</div><button id="start">Oyunu Başlat</button>
+  <canvas id="game" width="1280" height="720"></canvas><video id="camera" autoplay playsinline muted hidden></video>
 <script type="module">
-import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
-
-const canvas = document.getElementById("game");
-const ctx = canvas.getContext("2d");
-const video = document.getElementById("camera");
-const status = document.getElementById("status");
-const start = document.getElementById("start");
-const W = 1280, H = 720, TAU = Math.PI * 2;
-
-let landmarker, stream, lastVideoTime = -1, lastFrame = performance.now();
-let hand = null, previousWrist = null, ducks = [], clouds = [];
-let score = 0, lives = 5, spawn = 0, world = 0, gameOver = false;
-let lastShot = -Infinity, recoil = 0, muzzleFlash = 0;
-const rnd = (a, b) => a + Math.random() * (b - a);
-
-function makeCloud(initial = false) {
-  return { x: initial ? rnd(-100, W) : W + rnd(40, 220), y: rnd(60, 310), size: rnd(.7, 1.7), speed: rnd(8, 24) };
-}
-clouds = Array.from({ length: 9 }, () => makeCloud(true));
-
-function makeDuck() {
-  const direction = Math.random() < .5 ? 1 : -1;
-  return { x: direction > 0 ? -90 : W + 90, y: rnd(150, H * .72), direction, speed: rnd(150, 250), size: rnd(34, 54), phase: rnd(0, TAU), age: 0 };
-}
-
-function drawSky() {
-  const g = ctx.createLinearGradient(0, 0, 0, H);
-  g.addColorStop(0, "#399ed3"); g.addColorStop(.7, "#bcecff"); g.addColorStop(1, "#d9f2c0");
-  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = "#86bf78"; ctx.fillRect(0, H * .78, W, H * .22);
-  ctx.fillStyle = "#a9d789";
-  for (let x = -80 - (world * .35 % 80); x < W + 80; x += 80) {
-    ctx.beginPath(); ctx.moveTo(x, H * .78); ctx.lineTo(x + 38, H * .70); ctx.lineTo(x + 76, H * .78); ctx.fill();
-  }
-  for (const c of clouds) {
-    ctx.save(); ctx.translate(c.x, c.y); ctx.scale(c.size, c.size); ctx.fillStyle = "white";
-    for (const [x, y, r] of [[0, 8, 35], [38, 0, 48], [78, 12, 32], [42, 20, 55]]) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); }
-    ctx.restore();
-  }
-}
-
-function drawDuck(d) {
-  ctx.save(); ctx.translate(d.x, d.y + Math.sin(d.age * 4 + d.phase) * 15); ctx.scale(d.direction, 1);
-  const s = d.size;
-  ctx.fillStyle = "#f7c843"; ctx.beginPath(); ctx.ellipse(0, 0, s, s * .48, 0, 0, TAU); ctx.fill();
-  ctx.fillStyle = "#ffe477"; ctx.beginPath(); ctx.arc(s * .55, -s * .27, s * .37, 0, TAU); ctx.fill();
-  ctx.fillStyle = "#e87827"; ctx.beginPath(); ctx.moveTo(s * .82, -s * .28); ctx.lineTo(s * 1.25, -s * .15); ctx.lineTo(s * .82, -s * .03); ctx.fill();
-  ctx.fillStyle = "white"; ctx.beginPath(); ctx.ellipse(-s * .08, -s * .1, s * .32, s * .15, -.45, 0, TAU); ctx.fill();
-  ctx.fillStyle = "#202938"; ctx.beginPath(); ctx.arc(s * .63, -s * .36, Math.max(3, s * .07), 0, TAU); ctx.fill();
-  ctx.restore();
-}
-
-function pointOnLine(a, b, distance) {
-  const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
-  return { x: a.x + (b.x - a.x) / length * distance, y: a.y + (b.y - a.y) / length * distance };
-}
-
-// Kamerayı göstermeden, elin konumuna bağlı tek bir kol ve tabanca çizilir.
-function drawArmAndGun() {
-  if (!hand || !hand.gun) return;
-  const wrist = hand.wrist;
-  const aim = { x: hand.x, y: hand.y };
-  const angle = Math.atan2(aim.y - wrist.y, aim.x - wrist.x) - recoil * .42;
-  const muzzle = pointOnLine(wrist, aim, 42);
-  const grip = pointOnLine(wrist, aim, -12);
-  const elbow = { x: wrist.x + (wrist.x - W * .55) * .42, y: wrist.y + 190 };
-
-  ctx.save();
-  ctx.lineCap = "round";
-  ctx.strokeStyle = "#c98258"; ctx.lineWidth = 64;
-  ctx.beginPath(); ctx.moveTo(elbow.x, elbow.y); ctx.lineTo(wrist.x, wrist.y); ctx.stroke();
-  ctx.strokeStyle = "#efa878"; ctx.lineWidth = 50;
-  ctx.beginPath(); ctx.moveTo(elbow.x, elbow.y); ctx.lineTo(wrist.x, wrist.y); ctx.stroke();
-
-  ctx.translate(grip.x, grip.y); ctx.rotate(angle);
-  ctx.fillStyle = "#202633";
-  ctx.beginPath(); ctx.roundRect(-8, -18, 82, 36, 9); ctx.fill();
-  ctx.fillStyle = "#303b4d"; ctx.beginPath(); ctx.roundRect(55, -12, 92, 24, 6); ctx.fill();
-  ctx.fillStyle = "#111721"; ctx.beginPath(); ctx.roundRect(134, -8, 48, 16, 4); ctx.fill();
-  ctx.fillStyle = "#4b586b"; ctx.fillRect(74, -5, 48, 5);
-  ctx.fillStyle = "#171c27"; ctx.beginPath(); ctx.moveTo(8, 14); ctx.lineTo(40, 14); ctx.lineTo(31, 68); ctx.lineTo(3, 57); ctx.closePath(); ctx.fill();
-  ctx.fillStyle = "#efb083"; ctx.beginPath(); ctx.arc(-3, 0, 18, 0, TAU); ctx.fill();
-  if (muzzleFlash > 0) { ctx.fillStyle = `rgba(255,220,80,${muzzleFlash})`; ctx.beginPath(); ctx.moveTo(182, 0); ctx.lineTo(225, -18); ctx.lineTo(211, 0); ctx.lineTo(225, 18); ctx.closePath(); ctx.fill(); }
-  ctx.restore();
-}
-
-function drawReticle() {
-  if (!hand) return;
-  ctx.strokeStyle = hand.gun ? "#ffe066" : "#ffffff"; ctx.lineWidth = 3;
-  ctx.beginPath(); ctx.arc(hand.x, hand.y, 22, 0, TAU); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(hand.x - 31, hand.y); ctx.lineTo(hand.x - 10, hand.y); ctx.moveTo(hand.x + 10, hand.y); ctx.lineTo(hand.x + 31, hand.y); ctx.moveTo(hand.x, hand.y - 31); ctx.lineTo(hand.x, hand.y - 10); ctx.moveTo(hand.x, hand.y + 10); ctx.lineTo(hand.x, hand.y + 31); ctx.stroke();
-}
-
-function shoot(now) {
-  if (!hand?.gun || !hand.flick || now - lastShot < 350) return;
-  lastShot = now; recoil = 1; muzzleFlash = 1;
-  let target = null, best = Infinity;
-  for (const d of ducks) { const distance = Math.hypot(d.x - hand.x, d.y - hand.y); if (distance < best) { best = distance; target = d; } }
-  if (target && best < target.size * 1.8) { ducks.splice(ducks.indexOf(target), 1); score++; } else score = Math.max(0, score - 1);
-}
-
-function distance(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function extended(lm, tip, mcp) { return distance(lm[tip], lm[0]) > distance(lm[mcp], lm[0]) * 1.22; }
-
-function readHand(result, now) {
-  if (!result.landmarks?.length) { hand = null; previousWrist = null; return; }
-  const lm = result.landmarks[0];
-  const index = extended(lm, 8, 5), middle = extended(lm, 12, 9), ring = extended(lm, 16, 13), pinky = extended(lm, 20, 17);
-  const gun = index && middle && !ring && !pinky;
-  const currentWrist = { x: (1 - lm[0].x) * W, y: lm[0].y * H };
-  // Ateş, silah pozu korunurken bileğin/namlunun hızlı yukarı flick hareketidir.
-  const upwardSpeed = previousWrist ? (previousWrist.y - currentWrist.y) / Math.max(.016, (now - previousWrist.time) / 1000) : 0;
-  const flick = gun && upwardSpeed > 520;
-  hand = { x: (1 - lm[8].x) * W, y: lm[8].y * H, wrist: currentWrist, gun, flick };
-  previousWrist = { ...currentWrist, time: now };
-}
-
-async function setup() {
-  status.textContent = "El modeli yükleniyor...";
-  const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
-  landmarker = await HandLandmarker.createFromOptions(vision, { baseOptions: { modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task", delegate: "GPU" }, runningMode: "VIDEO", numHands: 1, minHandDetectionConfidence: .55, minHandPresenceConfidence: .55, minTrackingConfidence: .55 });
-  stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 }, audio: false });
-  video.srcObject = stream; await video.play(); start.classList.add("hidden");
-  status.textContent = "İşaret + orta açık, yüzük + serçe kapalı. Ateş için silahı hızlıca yukarı kaldır.";
-  requestAnimationFrame(loop);
-}
-
-function loop(now) {
-  const dt = Math.min(.05, (now - lastFrame) / 1000); lastFrame = now; world += dt * 80;
-  recoil = Math.max(0, recoil - dt * 7); muzzleFlash = Math.max(0, muzzleFlash - dt * 8); drawSky();
-  for (const c of clouds) { c.x -= c.speed * dt; if (c.x < -180) Object.assign(c, makeCloud()); }
-  if (!gameOver) {
-    spawn -= dt; if (spawn <= 0) { ducks.push(makeDuck()); spawn = rnd(.65, 1.35); }
-    for (const d of ducks) { d.x += d.direction * d.speed * dt; d.age += dt; drawDuck(d); }
-    for (let i = ducks.length - 1; i >= 0; i--) if (ducks[i].x < -130 || ducks[i].x > W + 130) { ducks.splice(i, 1); lives--; }
-    if (video.readyState >= 2 && video.currentTime !== lastVideoTime) { lastVideoTime = video.currentTime; readHand(landmarker.detectForVideo(video, now), now); }
-    shoot(now); drawArmAndGun(); drawReticle(); if (lives <= 0) gameOver = true;
-  }
-  ctx.fillStyle = "#102238cc"; ctx.fillRect(18, 18, 330, 78); ctx.fillStyle = "#fff"; ctx.font = "bold 24px system-ui"; ctx.fillText(`Skor: ${score}`, 34, 50); ctx.fillText(`Can: ${"♥".repeat(Math.max(0, lives))}`, 34, 79);
-  if (gameOver) { ctx.fillStyle = "#102238dd"; ctx.fillRect(0, 0, W, H); ctx.fillStyle = "#fff"; ctx.textAlign = "center"; ctx.font = "bold 64px system-ui"; ctx.fillText("Oyun Bitti", W / 2, H / 2 - 20); ctx.font = "28px system-ui"; ctx.fillText(`Skorun: ${score} — Yenilemek için sayfayı yenile`, W / 2, H / 2 + 40); ctx.textAlign = "start"; }
-  requestAnimationFrame(loop);
-}
-
-start.addEventListener("click", () => setup().catch(e => status.textContent = "Hata: " + e.message));
-window.addEventListener("beforeunload", () => stream?.getTracks().forEach(t => t.stop()));
-</script>
-</body>
-</html>
+import{HandLandmarker,FilesetResolver}from"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+const canvas=document.getElementById("game"),ctx=canvas.getContext("2d"),video=document.getElementById("camera"),status=document.getElementById("status"),start=document.getElementById("start");
+const W=1280,H=720,TAU=Math.PI*2,rnd=(a,b)=>a+Math.random()*(b-a);let landmarker,stream,lastVideo=-1,lastFrame=performance.now(),hand=null,previousIndexExtended=false,ducks=[],clouds=[],score=0,lives=7,spawn=0,world=0,gameOver=false,lastShot=-Infinity,recoil=0,flash=0;
+function makeCloud(initial=false){return{x:initial?rnd(-100,W):W+rnd(40,220),y:rnd(60,310),size:rnd(.7,1.7),speed:rnd(8,24)}}clouds=Array.from({length:9},()=>makeCloud(true));
+function makeDuck(){let direction=Math.random()<.5?1:-1;return{x:direction>0?-100:W+100,y:rnd(145,H*.7),direction,speed:rnd(95,175),size:rnd(42,62),phase:rnd(0,TAU),age:0}}
+function dist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}function extended(lm,tip,mcp){return dist(lm[tip],lm[0])>dist(lm[mcp],lm[0])*1.18}function clamp(n,a,b){return Math.max(a,Math.min(b,n))}
+function sky(){let g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,"#399ed3");g.addColorStop(.7,"#bcecff");g.addColorStop(1,"#d9f2c0");ctx.fillStyle=g;ctx.fillRect(0,0,W,H);ctx.fillStyle="#86bf78";ctx.fillRect(0,H*.78,W,H*.22);ctx.fillStyle="#a9d789";for(let x=-80-world*.35%80;x<W+80;x+=80){ctx.beginPath();ctx.moveTo(x,H*.78);ctx.lineTo(x+38,H*.7);ctx.lineTo(x+76,H*.78);ctx.fill()}for(const c of clouds){ctx.save();ctx.translate(c.x,c.y);ctx.scale(c.size,c.size);ctx.fillStyle="#fff";for(const [x,y,r]of[[0,8,35],[38,0,48],[78,12,32],[42,20,55]]){ctx.beginPath();ctx.arc(x,y,r,0,TAU);ctx.fill()}ctx.restore()}}
+function drawDuck(d){ctx.save();ctx.translate(d.x,d.y+Math.sin(d.age*4+d.phase)*15);ctx.scale(d.direction,1);let s=d.size;ctx.fillStyle="#f7c843";ctx.beginPath();ctx.ellipse(0,0,s,s*.48,0,0,TAU);ctx.fill();ctx.fillStyle="#ffe477";ctx.beginPath();ctx.arc(s*.55,-s*.27,s*.37,0,TAU);ctx.fill();ctx.fillStyle="#e87827";ctx.beginPath();ctx.moveTo(s*.82,-s*.28);ctx.lineTo(s*1.25,-s*.15);ctx.lineTo(s*.82,-s*.03);ctx.fill();ctx.fillStyle="#fff";ctx.beginPath();ctx.ellipse(-s*.08,-s*.1,s*.32,s*.15,-.45,0,TAU);ctx.fill();ctx.fillStyle="#202938";ctx.beginPath();ctx.arc(s*.63,-s*.36,Math.max(3,s*.07),0,TAU);ctx.fill();ctx.restore()}
+function linePoint(a,b,n){let l=Math.hypot(b.x-a.x,b.y-a.y)||1;return{x:a.x+(b.x-a.x)/l*n,y:a.y+(b.y-a.y)/l*n}}
+function drawArmAndGun(){if(!hand?.gun)return;let w=hand.wrist,aim=hand.thumb,angle=Math.atan2(aim.y-w.y,aim.x-w.x)-recoil*.18,grip=linePoint(w,aim,-8),elbow={x:w.x+(w.x-W*.5)*.36,y:w.y+210};ctx.save();ctx.lineCap="round";ctx.strokeStyle="#a96649";ctx.lineWidth=72;ctx.beginPath();ctx.moveTo(elbow.x,elbow.y);ctx.lineTo(w.x,w.y);ctx.stroke();ctx.strokeStyle="#e5a078";ctx.lineWidth=57;ctx.beginPath();ctx.moveTo(elbow.x,elbow.y);ctx.lineTo(w.x,w.y);ctx.stroke();ctx.fillStyle="#e5a078";ctx.beginPath();ctx.arc(w.x,w.y,31,0,TAU);ctx.fill();ctx.translate(grip.x,grip.y);ctx.rotate(angle);ctx.shadowColor="#11182788";ctx.shadowBlur=12;ctx.fillStyle="#202936";ctx.beginPath();ctx.roundRect(-15,-19,92,38,10);ctx.fill();ctx.fillStyle="#344256";ctx.beginPath();ctx.roundRect(57,-13,116,26,7);ctx.fill();ctx.fillStyle="#111720";ctx.beginPath();ctx.roundRect(164,-8,54,16,4);ctx.fill();ctx.fillStyle="#53647b";ctx.fillRect(80,-6,62,5);ctx.shadowBlur=0;ctx.fillStyle="#171d29";ctx.beginPath();ctx.moveTo(10,15);ctx.lineTo(43,15);ctx.lineTo(34,78);ctx.lineTo(0,63);ctx.closePath();ctx.fill();ctx.fillStyle="#be754f";ctx.beginPath();ctx.roundRect(2,29,31,35,7);ctx.fill();ctx.strokeStyle="#66758a";ctx.lineWidth=3;ctx.strokeRect(18,-9,38,18);if(flash>0){ctx.fillStyle=`rgba(255,220,80,${flash})`;ctx.beginPath();ctx.moveTo(218,0);ctx.lineTo(274,-25);ctx.lineTo(254,0);ctx.lineTo(274,25);ctx.closePath();ctx.fill()}ctx.restore()}
+function drawReticle(){if(!hand)return;ctx.strokeStyle=hand.gun?"#ffe066":"#fff";ctx.lineWidth=3;ctx.beginPath();ctx.arc(hand.thumb.x,hand.thumb.y,25,0,TAU);ctx.stroke();ctx.beginPath();ctx.moveTo(hand.thumb.x-35,hand.thumb.y);ctx.lineTo(hand.thumb.x-10,hand.thumb.y);ctx.moveTo(hand.thumb.x+10,hand.thumb.y);ctx.lineTo(hand.thumb.x+35,hand.thumb.y);ctx.moveTo(hand.thumb.x,hand.thumb.y-35);ctx.lineTo(hand.thumb.x,hand.thumb.y-10);ctx.moveTo(hand.thumb.x,hand.thumb.y+10);ctx.lineTo(hand.thumb.x,hand.thumb.y+35);ctx.stroke()}
+function shoot(now){if(!hand?.fire||now-lastShot<300)return;lastShot=now;recoil=1;flash=1;let target=null,best=Infinity;for(const d of ducks){let n=Math.hypot(d.x-hand.thumb.x,d.y-hand.thumb.y);if(n<best){best=n;target=d}}if(target&&best<Math.max(110,target.size*2.1)){ducks.splice(ducks.indexOf(target),1);score++}else score=Math.max(0,score-1)}
+function readHand(result,now){if(!result.landmarks?.length){hand=null;previousIndexExtended=false;return}let lm=result.landmarks[0],thumbOpen=dist(lm[4],lm[0])>dist(lm[2],lm[0])*.98,indexExtended=extended(lm,8,5),middleClosed=!extended(lm,12,9),ringClosed=!extended(lm,16,13),pinkyClosed=!extended(lm,20,17),gun=thumbOpen&&middleClosed&&ringClosed&&pinkyClosed;let thumb={x:(1-lm[4].x)*W,y:lm[4].y*H},wrist={x:(1-lm[0].x)*W,y:lm[0].y*H};if(!gun)previousIndexExtended=false;let fire=gun&&previousIndexExtended&&!indexExtended;hand={thumb,wrist,gun,fire,indexExtended};if(gun)previousIndexExtended=indexExtended}
+async function setup(){status.textContent="El modeli yükleniyor...";let vision=await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");landmarker=await HandLandmarker.createFromOptions(vision,{baseOptions:{modelAssetPath:"https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",delegate:"GPU"},runningMode:"VIDEO",numHands:1,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5});stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"user",width:640,height:480},audio:false});video.srcObject=stream;await video.play();start.classList.add("hidden");status.textContent="Başparmak + işaret açık, diğer parmaklar kapalı. İşaret parmağını bükerek tetiği çek.";requestAnimationFrame(loop)}
+function loop(now){let dt=Math.min(.05,(now-lastFrame)/1000);lastFrame=now;world+=dt*80;recoil=Math.max(0,recoil-dt*6);flash=Math.max(0,flash-dt*10);sky();for(const c of clouds){c.x-=c.speed*dt;if(c.x<-180)Object.assign(c,makeCloud())}if(!gameOver){spawn-=dt;if(spawn<=0){ducks.push(makeDuck());spawn=rnd(.8,1.5)}for(const d of ducks){d.x+=d.direction*d.speed*dt;d.age+=dt;drawDuck(d)}for(let i=ducks.length-1;i>=0;i--)if(ducks[i].x<-150||ducks[i].x>W+150){ducks.splice(i,1);lives--}if(video.readyState>=2&&video.currentTime!==lastVideo){lastVideo=video.currentTime;readHand(landmarker.detectForVideo(video,now),now)}shoot(now);drawArmAndGun();drawReticle();if(lives<=0)gameOver=true}ctx.fillStyle="#102238cc";ctx.fillRect(18,18,360,80);ctx.fillStyle="#fff";ctx.font="bold 24px system-ui";ctx.fillText(`Skor: ${score}`,34,50);ctx.fillText(`Can: ${"♥".repeat(Math.max(0,lives))}`,34,79);if(gameOver){ctx.fillStyle="#102238dd";ctx.fillRect(0,0,W,H);ctx.fillStyle="#fff";ctx.textAlign="center";ctx.font="bold 64px system-ui";ctx.fillText("Oyun Bitti",W/2,H/2-20);ctx.font="28px system-ui";ctx.fillText(`Skorun: ${score} — Yenilemek için sayfayı yenile`,W/2,H/2+40);ctx.textAlign="start"}requestAnimationFrame(loop)}
+start.addEventListener("click",()=>setup().catch(e=>status.textContent="Hata: "+e.message));window.addEventListener("beforeunload",()=>stream?.getTracks().forEach(t=>t.stop()));
+</script></body></html>
