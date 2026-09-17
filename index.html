@@ -1,3 +1,441 @@
 <!doctype html>
-<html lang="tr"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sky Hunt</title><style>*{box-sizing:border-box}body{margin:0;overflow:hidden;min-height:100vh;display:grid;place-items:center;background:#071326;font-family:system-ui,sans-serif}canvas{width:min(100vw,1280px);height:min(100vh,720px);object-fit:contain}#status{position:fixed;top:12px;left:50%;transform:translateX(-50%);z-index:3;padding:9px 16px;border-radius:999px;background:#07101dcc;color:white;text-align:center}#start{position:fixed;z-index:4;padding:14px 24px;border:0;border-radius:14px;background:#ffb703;font-weight:700;font-size:18px}#start.hidden{display:none}</style></head><body><div id="status">Oyunu başlatmak için butona bas</div><button id="start">Oyunu Başlat</button><canvas id="game" width="1280" height="720"></canvas><video id="camera" autoplay playsinline muted hidden></video>
-<script type="module">import{HandLandmarker,FilesetResolver}from"https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";const C=document.querySelector('#game'),X=C.getContext('2d'),V=document.querySelector('#camera'),S=document.querySelector('#status'),B=document.querySelector('#start'),W=1280,H=720,A=new Image();A.src='assets/player-weapon.svg';let M,T,last=-1,prev=performance.now(),aim={x:W/2,y:H*.44},goal={...aim},hand=null,ducks=[],clouds=[],score=0,lives=7,spawn=0,t=0,recoil=0,flash=0,over=false,shot=-Infinity,triggered=false,openFrames=0,closedFrames=0;const R=(a,b)=>a+Math.random()*(b-a),D=(a,b)=>Math.hypot(a.x-b.x,a.y-b.y),cloud=()=>({x:R(0,W),y:R(50,290),s:R(.7,1.6),v:R(7,20)});clouds=Array.from({length:9},cloud);function duck(){let d=Math.random()<.5?1:-1;return{x:d>0?-100:W+100,y:R(130,500),d,v:R(80,145),s:R(62,82),p:R(0,6.28),a:0}}function sky(){let g=X.createLinearGradient(0,0,0,H);g.addColorStop(0,'#318ec9');g.addColorStop(.72,'#bcecff');g.addColorStop(1,'#d9f2c0');X.fillStyle=g;X.fillRect(0,0,W,H);X.fillStyle='#78b86e';X.fillRect(0,560,W,160);for(let c of clouds){X.save();X.translate(c.x,c.y);X.scale(c.s,c.s);X.fillStyle='#fff';for(let q of[[0,8,35],[38,0,48],[78,12,32],[42,20,55]]){X.beginPath();X.arc(...q,0,6.28);X.fill()}X.restore()}}function drawDuck(q){X.save();X.translate(q.x,q.y+Math.sin(q.a*4+q.p)*13);X.scale(q.d,1);X.fillStyle='#f7c843';X.beginPath();X.ellipse(0,0,q.s,q.s*.48,0,0,6.28);X.fill();X.fillStyle='#ffe477';X.beginPath();X.arc(q.s*.55,-q.s*.27,q.s*.37,0,6.28);X.fill();X.fillStyle='#e87827';X.beginPath();X.moveTo(q.s*.82,-q.s*.28);X.lineTo(q.s*1.25,-q.s*.15);X.lineTo(q.s*.82,-q.s*.03);X.fill();X.fillStyle='#202633';X.beginPath();X.arc(q.s*.63,-q.s*.36,5,0,6.28);X.fill();X.restore()}function gun(){if(!hand?.gun)return;let sx=Math.max(-25,Math.min(25,(aim.x-W/2)*.045)),sy=Math.max(-14,Math.min(14,(aim.y-H*.44)*.03));X.save();X.translate(455+sx,470+sy+recoil*15);X.rotate((aim.x-W/2)*.0003-recoil*.025);X.globalAlpha=.98;X.drawImage(A,-360,-270,900,700);if(flash){X.globalAlpha=flash;X.fillStyle='#fff0a3';X.beginPath();X.arc(469,-42,30,0,6.28);X.fill()}X.restore();X.globalAlpha=1}function cross(){if(!hand)return;X.strokeStyle=hand.gun?'#ffe066':'#fff';X.lineWidth=3;X.beginPath();X.arc(aim.x,aim.y,24,0,6.28);X.moveTo(aim.x-36,aim.y);X.lineTo(aim.x-10,aim.y);X.moveTo(aim.x+10,aim.y);X.lineTo(aim.x+36,aim.y);X.moveTo(aim.x,aim.y-36);X.lineTo(aim.x,aim.y-10);X.moveTo(aim.x,aim.y+10);X.lineTo(aim.x,aim.y+36);X.stroke()}function ang(a,b,c){let ab=D(a,b),cb=D(c,b),ac=D(a,c);return Math.acos(Math.max(-1,Math.min(1,(ab*ab+cb*cb-ac*ac)/(2*ab*cb))))*57.3}function curled(l){return ang(l[8],l[6],l[5])<150&&ang(l[6],l[7],l[8])<158}function read(r){if(!r.landmarks?.length){hand=null;return}let l=r.landmarks[0],thumb=D(l[4],l[0])>D(l[2],l[0])*.86,curled=curled(l),before=triggered;openFrames=curled?0:openFrames+1;closedFrames=curled?closedFrames+1:0;if(!curled&&openFrames>2)triggered=false;if(thumb&&curled&&closedFrames>2&&!triggered){triggered=true;hand={thumb:{x:(1-l[4].x)*W,y:l[4].y*H},gun:true,fire:true};return}hand={thumb:{x:(1-l[4].x)*W,y:l[4].y*H},gun:thumb,fire:false};goal=hand.thumb}function fire(n){if(!hand?.fire||n-shot<360)return;shot=n;recoil=1;flash=1;let h=null,b=1e9;for(let q of ducks){let z=D(q,aim);if(z<b){b=z;h=q}}if(h&&b<Math.max(145,h.s*1.9)){ducks.splice(ducks.indexOf(h),1);score++}else score=Math.max(0,score-1)}async function setup(){S.textContent='El modeli yükleniyor...';let z=await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');M=await HandLandmarker.createFromOptions(z,{baseOptions:{modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',delegate:'GPU'},runningMode:'VIDEO',numHands:1,minHandDetectionConfidence:.5,minHandPresenceConfidence:.5,minTrackingConfidence:.5});T=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user',width:640,height:480},audio:false});V.srcObject=T;await V.play();B.classList.add('hidden');S.textContent='Başparmak açık; işaret parmağını bükerek ateş et.';requestAnimationFrame(loop)}function loop(n){let dt=Math.min(.05,(n-prev)/1000);prev=n;t+=dt*70;recoil=Math.max(0,recoil-dt*7);flash=Math.max(0,flash-dt*10);sky();for(let c of clouds){c.x-=c.v*dt;if(c.x<-180){Object.assign(c,cloud());c.x=W+120}}if(!over){spawn-=dt;if(spawn<=0){ducks.push(duck());spawn=R(1,1.8)}for(let q of ducks){q.x+=q.d*q.v*dt;q.a+=dt;drawDuck(q)}for(let i=ducks.length-1;i>=0;i--)if(ducks[i].x<-160||ducks[i].x>W+160){ducks.splice(i,1);lives--}if(V.readyState>=2&&V.currentTime!==last){last=V.currentTime;read(M.detectForVideo(V,n))}aim.x+=(goal.x-aim.x)*Math.min(1,dt*9);aim.y+=(goal.y-aim.y)*Math.min(1,dt*9);fire(n);gun();cross();if(lives<1)over=true}X.fillStyle='#102238cc';X.fillRect(18,18,410,82);X.fillStyle='#fff';X.font='bold 24px system-ui';X.fillText('Skor: '+score,34,50);X.fillText('Can: '+'♥'.repeat(Math.max(0,lives)),34,79);if(over){X.fillStyle='#102238dd';X.fillRect(0,0,W,H);X.fillStyle='#fff';X.textAlign='center';X.font='bold 64px system-ui';X.fillText('Oyun Bitti',W/2,H/2);X.textAlign='start'}requestAnimationFrame(loop)}B.onclick=()=>setup().catch(e=>S.textContent='Hata: '+e.message);</script></body></html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sky Hunt</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #071326;
+      overflow: hidden;
+      font-family: system-ui, sans-serif;
+    }
+    body {
+      display: grid;
+      place-items: center;
+    }
+    canvas {
+      width: min(100vw, 1280px);
+      height: min(100vh, 720px);
+      display: block;
+      object-fit: contain;
+    }
+    #status {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 5;
+      padding: 9px 16px;
+      border-radius: 999px;
+      background: rgba(6, 16, 29, 0.8);
+      color: #fff;
+      font-size: 14px;
+      text-align: center;
+      letter-spacing: 0.02em;
+      user-select: none;
+    }
+    #start {
+      position: fixed;
+      z-index: 6;
+      border: 0;
+      border-radius: 14px;
+      background: #ffb703;
+      color: #17202b;
+      font-size: 18px;
+      font-weight: 800;
+      padding: 14px 24px;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+    }
+    #start.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <div id="status">Oyunu başlatmak için butona bas</div>
+  <button id="start">Oyunu Başlat</button>
+  <canvas id="game" width="1280" height="720"></canvas>
+  <video id="camera" autoplay playsinline muted hidden></video>
+
+  <script type="module">
+    import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14";
+
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+    const video = document.getElementById("camera");
+    const statusEl = document.getElementById("status");
+    const startBtn = document.getElementById("start");
+
+    const W = 1280;
+    const H = 720;
+    const TAU = Math.PI * 2;
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const rnd = (a, b) => a + Math.random() * (b - a);
+
+    const weaponImage = new Image();
+    weaponImage.src = "assets/player-weapon.svg";
+
+    let handLandmarker = null;
+    let stream = null;
+    let lastVideoTime = -1;
+    let lastFrame = performance.now();
+
+    let goalAim = { x: W * 0.5, y: H * 0.44 };
+    let aim = { x: W * 0.5, y: H * 0.44 };
+    let lastShot = -Infinity;
+    let recoil = 0;
+    let flash = 0;
+    let score = 0;
+    let lives = 7;
+    let spawnTimer = 0.8;
+    let world = 0;
+    let gameOver = false;
+
+    let ducks = [];
+    let clouds = Array.from({ length: 9 }, () => ({
+      x: rnd(-120, W),
+      y: rnd(50, 290),
+      scale: rnd(0.7, 1.6),
+      speed: rnd(8, 22),
+    }));
+
+    let handState = {
+      gunPose: false,
+      triggerPressed: false,
+      triggerWasDown: false,
+      active: false,
+      aimTarget: { x: W * 0.5, y: H * 0.44 },
+    };
+
+    function makeDuck() {
+      const direction = Math.random() < 0.5 ? 1 : -1;
+      return {
+        x: direction > 0 ? -110 : W + 110,
+        y: rnd(120, H * 0.7),
+        direction,
+        speed: rnd(80, 150),
+        size: rnd(60, 82),
+        phase: rnd(0, TAU),
+        age: 0,
+      };
+    }
+
+    function drawSky() {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, "#3190cc");
+      grad.addColorStop(0.7, "#bfeaff");
+      grad.addColorStop(1, "#d7f3c7");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+
+      ctx.fillStyle = "#7fb96b";
+      ctx.fillRect(0, H * 0.78, W, H * 0.22);
+
+      ctx.fillStyle = "#acd88f";
+      for (let x = -80 - (world * 0.3) % 80; x < W + 80; x += 80) {
+        ctx.beginPath();
+        ctx.moveTo(x, H * 0.78);
+        ctx.lineTo(x + 38, H * 0.70);
+        ctx.lineTo(x + 76, H * 0.78);
+        ctx.fill();
+      }
+
+      for (const cloud of clouds) {
+        ctx.save();
+        ctx.translate(cloud.x, cloud.y);
+        ctx.scale(cloud.scale, cloud.scale);
+        ctx.fillStyle = "#ffffff";
+        for (const [cx, cy, r] of [[0, 8, 35], [38, 0, 48], [78, 12, 32], [42, 20, 55]]) {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, TAU);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    }
+
+    function drawDuck(duck) {
+      ctx.save();
+      ctx.translate(duck.x, duck.y + Math.sin(duck.age * 4 + duck.phase) * 12);
+      ctx.scale(duck.direction, 1);
+
+      ctx.fillStyle = "#f6c544";
+      ctx.beginPath();
+      ctx.ellipse(0, 0, duck.size, duck.size * 0.48, 0, 0, TAU);
+      ctx.fill();
+
+      ctx.fillStyle = "#ffe477";
+      ctx.beginPath();
+      ctx.arc(duck.size * 0.55, -duck.size * 0.27, duck.size * 0.37, 0, TAU);
+      ctx.fill();
+
+      ctx.fillStyle = "#e87727";
+      ctx.beginPath();
+      ctx.moveTo(duck.size * 0.82, -duck.size * 0.28);
+      ctx.lineTo(duck.size * 1.25, -duck.size * 0.15);
+      ctx.lineTo(duck.size * 0.82, -duck.size * 0.03);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = "#202938";
+      ctx.beginPath();
+      ctx.arc(duck.size * 0.63, -duck.size * 0.36, Math.max(3, duck.size * 0.07), 0, TAU);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function drawReticle() {
+      if (!handState.active) return;
+
+      ctx.strokeStyle = handState.gunPose ? "#ffe066" : "#ffffff";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(aim.x, aim.y, 24, 0, TAU);
+      ctx.moveTo(aim.x - 36, aim.y);
+      ctx.lineTo(aim.x - 10, aim.y);
+      ctx.moveTo(aim.x + 10, aim.y);
+      ctx.lineTo(aim.x + 36, aim.y);
+      ctx.moveTo(aim.x, aim.y - 36);
+      ctx.lineTo(aim.x, aim.y - 10);
+      ctx.moveTo(aim.x, aim.y + 10);
+      ctx.lineTo(aim.x, aim.y + 36);
+      ctx.stroke();
+    }
+
+    function drawWeapon() {
+      if (!handState.gunPose) return;
+
+      const swayX = clamp((aim.x - W * 0.5) * 0.04, -26, 26);
+      const swayY = clamp((aim.y - H * 0.44) * 0.03, -12, 15);
+      const drawX = 495 + swayX;
+      const drawY = 500 + swayY + recoil * 18;
+      const rotation = clamp((aim.x - W * 0.5) * 0.00035, -0.2, 0.2) - recoil * 0.035;
+
+      ctx.save();
+      ctx.translate(drawX, drawY);
+      ctx.rotate(rotation);
+      ctx.drawImage(weaponImage, -340, -260, 820, 560);
+
+      if (flash > 0) {
+        ctx.save();
+        ctx.globalAlpha = flash;
+        ctx.fillStyle = "#fff1a8";
+        ctx.beginPath();
+        ctx.ellipse(315, -70, 60, 42, 0, 0, TAU);
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+    }
+
+    function shoot(now) {
+      if (!handState.triggerPressed || now - lastShot < 360) return;
+      lastShot = now;
+      recoil = 1;
+      flash = 1;
+
+      let target = null;
+      let best = Infinity;
+
+      for (const duck of ducks) {
+        const d = dist(duck, aim);
+        if (d < best) {
+          best = d;
+          target = duck;
+        }
+      }
+
+      if (target && best < Math.max(160, target.size * 1.8)) {
+        ducks.splice(ducks.indexOf(target), 1);
+        score++;
+      } else {
+        score = Math.max(0, score - 1);
+      }
+    }
+
+    function angleBetween(a, b, c) {
+      const ab = dist(a, b);
+      const bc = dist(b, c);
+      const ac = dist(a, c);
+      return Math.acos(clamp((ab * ab + bc * bc - ac * ac) / (2 * ab * bc), -1, 1)) * 57.2958;
+    }
+
+    function isIndexBent(lm) {
+      const a = { x: lm[8].x, y: lm[8].y };
+      const b = { x: lm[6].x, y: lm[6].y };
+      const c = { x: lm[5].x, y: lm[5].y };
+      const d = { x: lm[0].x, y: lm[0].y };
+      const angle1 = angleBetween(a, b, c);
+      const angle2 = angleBetween(d, a, b);
+      return angle1 < 150 && angle2 < 150;
+    }
+
+    function readHand(result) {
+      if (!result.landmarks || result.landmarks.length === 0) {
+        handState = {
+          gunPose: false,
+          triggerPressed: false,
+          triggerWasDown: false,
+          active: false,
+          aimTarget: { x: W * 0.5, y: H * 0.44 },
+        };
+        return;
+      }
+
+      const lm = result.landmarks[0];
+      const thumbOpen = dist(lm[4], lm[0]) > dist(lm[2], lm[0]) * 0.9;
+      const indexExtended = dist(lm[8], lm[0]) > dist(lm[5], lm[0]) * 0.7;
+      const middleClosed = dist(lm[12], lm[0]) < dist(lm[9], lm[0]) * 0.82;
+      const ringClosed = dist(lm[16], lm[0]) < dist(lm[13], lm[0]) * 0.82;
+      const pinkyClosed = dist(lm[20], lm[0]) < dist(lm[17], lm[0]) * 0.82;
+
+      const gunPose = thumbOpen && indexExtended && middleClosed && ringClosed && pinkyClosed;
+      const triggerDown = isIndexBent(lm);
+
+      if (!gunPose) {
+        handState.triggerWasDown = false;
+      }
+
+      if (gunPose && triggerDown && !handState.triggerWasDown) {
+        handState.triggerPressed = true;
+        handState.triggerWasDown = true;
+      } else if (gunPose && !triggerDown) {
+        handState.triggerPressed = false;
+        handState.triggerWasDown = false;
+      } else if (!gunPose) {
+        handState.triggerPressed = false;
+      }
+
+      handState.gunPose = gunPose;
+      handState.active = gunPose;
+      handState.aimTarget = {
+        x: (1 - lm[4].x) * W,
+        y: lm[4].y * H,
+      };
+    }
+
+    async function setupHandTracking() {
+      statusEl.textContent = "El modeli yükleniyor...";
+      const vision = await FilesetResolver.forVisionTasks("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 1,
+        minHandDetectionConfidence: 0.5,
+        minHandPresenceConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: 640, height: 480 },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      startBtn.classList.add("hidden");
+      statusEl.textContent = "Başparmak açık, işaret parmağını bükerek ateş et.";
+      requestAnimationFrame(loop);
+    }
+
+    function loop(now) {
+      const dt = Math.min(0.05, (now - lastFrame) / 1000);
+      lastFrame = now;
+      world += dt * 75;
+      recoil = Math.max(0, recoil - dt * 7);
+      flash = Math.max(0, flash - dt * 9);
+
+      drawSky();
+
+      for (const cloud of clouds) {
+        cloud.x -= cloud.speed * dt;
+        if (cloud.x < -180) {
+          cloud.x = W + rnd(60, 220);
+          cloud.y = rnd(50, 290);
+          cloud.scale = rnd(0.7, 1.6);
+          cloud.speed = rnd(8, 22);
+        }
+      }
+
+      if (!gameOver) {
+        spawnTimer -= dt;
+        if (spawnTimer <= 0) {
+          ducks.push(makeDuck());
+          spawnTimer = rnd(0.9, 1.7);
+        }
+
+        for (const duck of ducks) {
+          duck.x += duck.direction * duck.speed * dt;
+          duck.age += dt;
+          drawDuck(duck);
+        }
+
+        for (let i = ducks.length - 1; i >= 0; i--) {
+          if (ducks[i].x < -180 || ducks[i].x > W + 180) {
+            ducks.splice(i, 1);
+            lives--;
+          }
+        }
+
+        if (video.readyState >= 2 && video.currentTime !== lastVideoTime) {
+          lastVideoTime = video.currentTime;
+          const result = handLandmarker.detectForVideo(video, now);
+          readHand(result);
+        }
+
+        aim.x += (handState.aimTarget.x - aim.x) * Math.min(1, dt * 10);
+        aim.y += (handState.aimTarget.y - aim.y) * Math.min(1, dt * 10);
+
+        shoot(now);
+        drawWeapon();
+        drawReticle();
+
+        if (lives <= 0) {
+          gameOver = true;
+        }
+      }
+
+      ctx.fillStyle = "rgba(16, 34, 56, 0.8)";
+      ctx.fillRect(18, 18, 360, 82);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 24px system-ui";
+      ctx.fillText(`Skor: ${score}`, 34, 50);
+      ctx.fillText(`Can: ${"♥".repeat(Math.max(0, lives))}`, 34, 79);
+
+      if (gameOver) {
+        ctx.fillStyle = "rgba(16, 34, 56, 0.88)";
+        ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "center";
+        ctx.font = "bold 64px system-ui";
+        ctx.fillText("Oyun Bitti", W / 2, H / 2 - 20);
+        ctx.font = "28px system-ui";
+        ctx.fillText(`Skorun: ${score} — Yenilemek için sayfayı yenile`, W / 2, H / 2 + 40);
+        ctx.textAlign = "left";
+      }
+
+      requestAnimationFrame(loop);
+    }
+
+    startBtn.addEventListener("click", () => {
+      setupHandTracking().catch((err) => {
+        statusEl.textContent = "Hata: " + err.message;
+      });
+    });
+
+    window.addEventListener("beforeunload", () => {
+      if (stream) {
+        stream.getTracks().forEach((track) => track.stop());
+      }
+    });
+  </script>
+</body>
+</html>
