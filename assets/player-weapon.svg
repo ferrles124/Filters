@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 700">
+<defs>
+ <linearGradient id="skin" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#f2b18a"/><stop offset="1" stop-color="#a75c48"/></linearGradient>
+ <linearGradient id="sleeve" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#456b8d"/><stop offset="1" stop-color="#17283d"/></linearGradient>
+ <linearGradient id="gun" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#687d94"/><stop offset=".45" stop-color="#26384e"/><stop offset="1" stop-color="#111b2a"/></linearGradient>
+ <linearGradient id="glow"><stop stop-color="#9ffcff"/><stop offset="1" stop-color="#268cff"/></linearGradient>
+ <filter id="shadow"><feGaussianBlur stdDeviation="9"/></filter>
+</defs>
+<!-- single first-person Minecraft-like block model: sleeve, arm, hand and weapon -->
+<ellipse cx="555" cy="631" rx="270" ry="28" fill="#000" opacity=".28" filter="url(#shadow)"/>
+<g stroke="#101a29" stroke-width="10" stroke-linejoin="round">
+ <path d="M120 700 165 420 300 350 430 435 385 700Z" fill="url(#sleeve)"/>
+ <path d="m165 420 135-70 130 85-120 78Z" fill="#5e88a7"/>
+ <path d="M255 386 372 329 498 405 381 469Z" fill="#29445d"/>
+ <path d="M330 420 475 340 575 416 430 501Z" fill="url(#skin)"/>
+ <path d="M413 435 492 351 566 389 493 482Z" fill="url(#skin)"/>
+ <path d="m438 342 63-91 53 30-25 109Z" fill="url(#skin)"/>
+ <path d="M380 469 470 407 546 452 456 514Z" fill="#d78d69"/>
+ <!-- chunky sci-fi weapon -->
+ <path d="m355 280 155-89 302 35 30 83-332 74Z" fill="url(#gun)"/>
+ <path d="m505 191 300 35-17 48-300-34Z" fill="#8799aa"/>
+ <path d="m802 226 63 8 30 39-42 36-50-9Z" fill="#18263a"/>
+ <path d="m849 247 62 7 18 20-52 30-31-10Z" fill="url(#glow)"/>
+ <path d="m443 363 125-54 35 101-140 62Z" fill="#1b2b40"/>
+ <path d="m475 371 78-31 13 24-78 32Z" fill="#6e87a0" stroke="none"/>
+ <path d="m547 216 28-39 101 12 16 43Z" fill="#314e67"/>
+ <path d="m587 183 28-42 81 12 20 37Z" fill="#182b42"/>
+ <path d="m625 153 13-25 54 8 9 27Z" fill="#82efff"/>
+ <path d="m393 283 80-25 22 35-84 27Z" fill="#90a6b9"/>
+ <circle cx="687" cy="245" r="16" fill="#85f4ff"/><circle cx="687" cy="245" r="6" fill="#fff"/>
+ <path d="m536 377 50-18 25 73-51 23Z" fill="#121d2d"/>
+ <path d="m554 399 37-13" stroke="#9fb5c7"/>
+</g>
+<!-- blocky finger around trigger -->
+<path d="M456 442 520 414 551 452 493 484Z" fill="#efa47d" stroke="#101a29" stroke-width="9"/>
+</svg>
